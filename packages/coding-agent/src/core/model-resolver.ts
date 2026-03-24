@@ -14,25 +14,26 @@ import type { ModelRegistry } from "./model-registry.js";
 export const defaultModelPerProvider: Record<KnownProvider, string> = {
 	"amazon-bedrock": "us.anthropic.claude-opus-4-6-v1",
 	anthropic: "claude-opus-4-6",
-	openai: "gpt-5.1-codex",
+	openai: "gpt-5.4",
 	"azure-openai-responses": "gpt-5.2",
-	"openai-codex": "gpt-5.3-codex",
+	"openai-codex": "gpt-5.4",
 	google: "gemini-2.5-pro",
 	"google-gemini-cli": "gemini-2.5-pro",
-	"google-antigravity": "gemini-3-pro-high",
+	"google-antigravity": "gemini-3.1-pro-high",
 	"google-vertex": "gemini-3-pro-preview",
 	"github-copilot": "gpt-4o",
 	openrouter: "openai/gpt-5.1-codex",
 	"vercel-ai-gateway": "anthropic/claude-opus-4-6",
 	xai: "grok-4-fast-non-reasoning",
 	groq: "openai/gpt-oss-120b",
-	cerebras: "zai-glm-4.6",
-	zai: "glm-4.6",
+	cerebras: "zai-glm-4.7",
+	zai: "glm-5",
 	mistral: "devstral-medium-latest",
-	minimax: "MiniMax-M2.1",
-	"minimax-cn": "MiniMax-M2.1",
+	minimax: "MiniMax-M2.7",
+	"minimax-cn": "MiniMax-M2.7",
 	huggingface: "moonshotai/Kimi-K2.5",
 	opencode: "claude-opus-4-6",
+	"opencode-go": "kimi-k2.5",
 	"kimi-coding": "kimi-k2-thinking",
 };
 
@@ -56,26 +57,60 @@ function isAlias(id: string): boolean {
 }
 
 /**
+ * Find an exact model reference match.
+ * Supports either a bare model id or a canonical provider/modelId reference.
+ * When matching by bare id, ambiguous matches across providers are rejected.
+ */
+export function findExactModelReferenceMatch(
+	modelReference: string,
+	availableModels: Model<Api>[],
+): Model<Api> | undefined {
+	const trimmedReference = modelReference.trim();
+	if (!trimmedReference) {
+		return undefined;
+	}
+
+	const normalizedReference = trimmedReference.toLowerCase();
+
+	const canonicalMatches = availableModels.filter(
+		(model) => `${model.provider}/${model.id}`.toLowerCase() === normalizedReference,
+	);
+	if (canonicalMatches.length === 1) {
+		return canonicalMatches[0];
+	}
+	if (canonicalMatches.length > 1) {
+		return undefined;
+	}
+
+	const slashIndex = trimmedReference.indexOf("/");
+	if (slashIndex !== -1) {
+		const provider = trimmedReference.substring(0, slashIndex).trim();
+		const modelId = trimmedReference.substring(slashIndex + 1).trim();
+		if (provider && modelId) {
+			const providerMatches = availableModels.filter(
+				(model) =>
+					model.provider.toLowerCase() === provider.toLowerCase() &&
+					model.id.toLowerCase() === modelId.toLowerCase(),
+			);
+			if (providerMatches.length === 1) {
+				return providerMatches[0];
+			}
+			if (providerMatches.length > 1) {
+				return undefined;
+			}
+		}
+	}
+
+	const idMatches = availableModels.filter((model) => model.id.toLowerCase() === normalizedReference);
+	return idMatches.length === 1 ? idMatches[0] : undefined;
+}
+
+/**
  * Try to match a pattern to a model from the available models list.
  * Returns the matched model or undefined if no match found.
  */
 function tryMatchModel(modelPattern: string, availableModels: Model<Api>[]): Model<Api> | undefined {
-	// Check for provider/modelId format (provider is everything before the first /)
-	const slashIndex = modelPattern.indexOf("/");
-	if (slashIndex !== -1) {
-		const provider = modelPattern.substring(0, slashIndex);
-		const modelId = modelPattern.substring(slashIndex + 1);
-		const providerMatch = availableModels.find(
-			(m) => m.provider.toLowerCase() === provider.toLowerCase() && m.id.toLowerCase() === modelId.toLowerCase(),
-		);
-		if (providerMatch) {
-			return providerMatch;
-		}
-		// No exact provider/model match - fall through to other matching
-	}
-
-	// Check for exact ID match (case-insensitive)
-	const exactMatch = availableModels.find((m) => m.id.toLowerCase() === modelPattern.toLowerCase());
+	const exactMatch = findExactModelReferenceMatch(modelPattern, availableModels);
 	if (exactMatch) {
 		return exactMatch;
 	}
@@ -111,6 +146,22 @@ export interface ParsedModelResult {
 	/** Thinking level if explicitly specified in pattern, undefined otherwise */
 	thinkingLevel?: ThinkingLevel;
 	warning: string | undefined;
+}
+
+function buildFallbackModel(provider: string, modelId: string, availableModels: Model<Api>[]): Model<Api> | undefined {
+	const providerModels = availableModels.filter((m) => m.provider === provider);
+	if (providerModels.length === 0) return undefined;
+
+	const defaultId = defaultModelPerProvider[provider as KnownProvider];
+	const baseModel = defaultId
+		? (providerModels.find((m) => m.id === defaultId) ?? providerModels[0])
+		: providerModels[0];
+
+	return {
+		...baseModel,
+		id: modelId,
+		name: modelId,
+	};
 }
 
 /**
@@ -387,6 +438,16 @@ export function resolveCliModel(options: {
 		}
 	}
 
+	if (provider) {
+		const fallbackModel = buildFallbackModel(provider, pattern, availableModels);
+		if (fallbackModel) {
+			const fallbackWarning = warning
+				? `${warning} Model "${pattern}" not found for provider "${provider}". Using custom model id.`
+				: `Model "${pattern}" not found for provider "${provider}". Using custom model id.`;
+			return { model: fallbackModel, thinkingLevel: undefined, warning: fallbackWarning, error: undefined };
+		}
+	}
+
 	const display = provider ? `${provider}/${pattern}` : cliModel;
 	return {
 		model: undefined,
@@ -436,12 +497,18 @@ export async function findInitialModel(options: {
 
 	// 1. CLI args take priority
 	if (cliProvider && cliModel) {
-		const found = modelRegistry.find(cliProvider, cliModel);
-		if (!found) {
-			console.error(chalk.red(`Model ${cliProvider}/${cliModel} not found`));
+		const resolved = resolveCliModel({
+			cliProvider,
+			cliModel,
+			modelRegistry,
+		});
+		if (resolved.error) {
+			console.error(chalk.red(resolved.error));
 			process.exit(1);
 		}
-		return { model: found, thinkingLevel: DEFAULT_THINKING_LEVEL, fallbackMessage: undefined };
+		if (resolved.model) {
+			return { model: resolved.model, thinkingLevel: DEFAULT_THINKING_LEVEL, fallbackMessage: undefined };
+		}
 	}
 
 	// 2. Use first model from scoped models (skip if continuing/resuming)

@@ -1,8 +1,10 @@
-# 🏖️ OSS Vacation
+<!-- OSS_WEEKEND_START -->
+# 🏖️ OSS Weekend
 
-**Issue tracker and PRs reopen March 2, 2026.**
+**Issue tracker reopens Monday, March 30, 2026.**
 
-All PRs will be auto-closed until then. Approved contributors can submit PRs after vacation without reapproval. For support, join [Discord](https://discord.com/invite/3cU7Bz4UPx).
+OSS weekend runs Sunday, March 22, 2026 through Monday, March 30, 2026. New issues are auto-closed during this time. For support, join [Discord](https://discord.com/invite/3cU7Bz4UPx).
+<!-- OSS_WEEKEND_END -->
 
 ---
 
