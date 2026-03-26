@@ -1,6 +1,8 @@
 <!-- OSS_WEEKEND_START -->
 # 🏖️ OSS Weekend
 
+[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/N4N71WOHZ3)
+
 **Issue tracker reopens Monday, March 30, 2026.**
 
 OSS weekend runs Sunday, March 22, 2026 through Monday, March 30, 2026. New issues are auto-closed during this time. For support, join [Discord](https://discord.com/invite/3cU7Bz4UPx).
